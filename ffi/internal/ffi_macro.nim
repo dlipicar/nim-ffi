@@ -1,10 +1,10 @@
 import std/[macros, options, tables, strutils]
-from std/os import `/`, relativePath
+from std/os import relativePath
 from std/compilesettings import querySetting, SingleValueSetting
 import chronos
 import ../ffi_types
 import ../ffi_thread_request
-import ../codegen/[meta, string_helpers]
+import ../codegen/[meta, string_helpers, build_paths]
 import ./ffi_route
 import ./ffi_export
 import ./ffi_codegen_common
@@ -1732,7 +1732,7 @@ proc bindingsOutputDir(lang, explicit: string): string {.compileTime.} =
   if explicit.len > 0:
     explicit
   else:
-    return querySetting(SingleValueSetting.projectPath) / (lang & "_bindings")
+    return buildPath(querySetting(SingleValueSetting.projectPath), lang & "_bindings")
 
 proc bindingsSrcPath(outDir, explicit: string): string {.compileTime.} =
   ## Nim source path embedded in build files, relative to `outDir`; defaults to
@@ -1791,14 +1791,22 @@ macro genBindings*(
     )
 
   when defined(ffiGenBindings):
-    let libName = deriveLibName(ffiProcRegistry)
-    for rawLang in targetLang.split(','):
-      let lang = string_helpers.toLower(rawLang.strip())
-      if lang.len == 0:
-        continue
-      let outDir = bindingsOutputDir(lang, outputDir)
-      emitBindingsFor(
-        lang, ffiProcRegistry, libName, outDir, bindingsSrcPath(outDir, nimSrcRelPath)
+    if querySetting(SingleValueSetting.command) == "check" and
+        not compileOption("experimental", "vmopsDanger"):
+      error(
+        "genBindings: `nim check` suppresses compile-time filesystem writes. " &
+          "Pass `--experimental:vmopsDanger`, or generate bindings with " &
+          "`nim c --compileOnly`."
       )
+    else:
+      let libName = deriveLibName(ffiProcRegistry)
+      for rawLang in targetLang.split(','):
+        let lang = string_helpers.toLower(rawLang.strip())
+        if lang.len == 0:
+          continue
+        let outDir = bindingsOutputDir(lang, outputDir)
+        emitBindingsFor(
+          lang, ffiProcRegistry, libName, outDir, bindingsSrcPath(outDir, nimSrcRelPath)
+        )
 
   newStmtList()
