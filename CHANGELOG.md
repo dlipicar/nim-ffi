@@ -60,6 +60,9 @@ All notable changes to this project are documented in this file.
   router would silently give it the ctor ABI instead.
 
 ### Changed
+- **FFI parameter names no longer collide with generated request internals.**
+  Names such as `callback`, `userData`, `T`, and `request` remain available to
+  user APIs and keep their original CBOR field names.
 - **Cross-compiled bindings now land in `ffiOutputDir`.** `genBindings` joined
     paths with the target OS's separator, so building for another OS wrote
     backslash-named files into the working directory. `nim check` now fails with a
