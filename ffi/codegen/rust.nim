@@ -1,7 +1,7 @@
 ## Rust binding generator: emits a complete Rust crate using CBOR (ciborium).
 
-import std/[os, strutils]
-import ./meta, ./string_helpers, ./types_ir, ./consts, ../ret_codes
+import std/strutils
+import ./meta, ./string_helpers, ./types_ir, ./consts, ./build_paths, ../ret_codes
 
 ## Wire-format Rust type for any Nim `ptr T`/`pointer`; fixed 64-bit for a
 ## host-independent CBOR payload size (mirrors CppPtrType).
@@ -819,14 +819,18 @@ proc generateRustCrate*(
     consts: seq[FFIConstMeta] = @[],
 ) =
   ## Generates a complete Rust crate in outputDir.
-  createDir(outputDir)
-  createDir(outputDir / "src")
+  ensureOutputDir(outputDir)
+  let srcDir = buildPath(outputDir, "src")
+  ensureOutputDir(srcDir)
 
-  writeFile(
-    outputDir / "Cargo.toml", generateCargoToml(libName, needsSerdeBytes(types, procs))
+  writeOutputFile(
+    buildPath(outputDir, "Cargo.toml"),
+    generateCargoToml(libName, needsSerdeBytes(types, procs)),
   )
-  writeFile(outputDir / "build.rs", generateBuildRs(libName, nimSrcRelPath))
-  writeFile(outputDir / "src" / "lib.rs", generateLibRs())
-  writeFile(outputDir / "src" / "ffi.rs", generateFFIRs(procs))
-  writeFile(outputDir / "src" / "types.rs", generateTypesRs(types, procs, consts))
-  writeFile(outputDir / "src" / "api.rs", generateApiRs(procs, libName, events))
+  writeOutputFile(
+    buildPath(outputDir, "build.rs"), generateBuildRs(libName, nimSrcRelPath)
+  )
+  writeOutputFile(buildPath(srcDir, "lib.rs"), generateLibRs())
+  writeOutputFile(buildPath(srcDir, "ffi.rs"), generateFFIRs(procs))
+  writeOutputFile(buildPath(srcDir, "types.rs"), generateTypesRs(types, procs, consts))
+  writeOutputFile(buildPath(srcDir, "api.rs"), generateApiRs(procs, libName, events))
