@@ -60,14 +60,11 @@ All notable changes to this project are documented in this file.
   router would silently give it the ctor ABI instead.
 
 ### Changed
-- **Binding generation now writes paths for the build host, not the target.**
-  `genBindings` runs in Nim's compile-time VM on the machine doing the build, so
-  using target path separators could leave cross-compiled output in incorrectly
-  named files outside `ffiOutputDir`. The C, C++, Rust and CDDL generators now
-  share build-host-aware path and checked-write helpers. `nim check` also emits
-  a direct diagnostic when filesystem VM operations are disabled instead of
-  silently skipping generation; use `--experimental:vmopsDanger` for that
-  command, or generate with `nim c --compileOnly`.
+- **Cross-compiled bindings now land in `ffiOutputDir`.** `genBindings` joined
+    paths with the target OS's separator, so building for another OS wrote
+    backslash-named files into the working directory. `nim check` now fails with a
+    diagnostic instead of silently skipping generation; pass
+    `--experimental:vmopsDanger`, or generate with `nim c --compileOnly`.
 - **The generated `NIMFFI_RET_*` codes come from the Nim constants.** The four
   codes were typed by hand in the C template, the C++ template and the Rust
   generator, and they had already drifted: the C header defined
