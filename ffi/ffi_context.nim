@@ -8,6 +8,7 @@ when defined(windows):
   import chronos/osdefs
 else:
   import chronos/selectors2
+  from std/posix import nil
 import
   ./ffi_types,
   ./ffi_events,
@@ -55,6 +56,13 @@ func reason*(failure: RecycleFailure): string =
   of RecycleFailure.CallerAbandoned:
     "the teardown outlasted the caller's wait"
 
+when defined(windows):
+  type ThreadPoller = HANDLE
+  const NoPoller = ThreadPoller(0)
+else:
+  type ThreadPoller = cint
+  const NoPoller = ThreadPoller(-1)
+
 type FFIContext*[T] = object
   myLib*: ptr T # main library object (Waku, LibP2P, SDS, …)
   myLibRefd*: bool
@@ -81,6 +89,9 @@ type FFIContext*[T] = object
     # is nil.
   ffiThread: Thread[(ptr FFIContext[T])]
   eventThread: Thread[(ptr FFIContext[T])]
+  ffiPoller: ThreadPoller
+  eventPoller: ThreadPoller
+    # Each thread's chronos poller: set when the thread starts, closed by whoever joins it.
   reqQueueBank: RequestQueueBank
   reqSignal: ThreadSignalPtr
   stopSignal: ThreadSignalPtr
@@ -133,14 +144,27 @@ proc ffiTeardownHook*[T](): var FFITeardownProc[T] =
   var hook {.global.}: FFITeardownProc[T]
   hook
 
-proc closeThreadDispatcher() =
-  ## chronos leaks a thread's dispatcher; free it last, once nothing polls (nim-chronos#614).
+proc currentThreadPoller(): ThreadPoller =
+  ## The calling thread's chronos poller, which chronos never closes (nim-chronos#614).
   when defined(windows):
-    if closeHandle(getThreadDispatcher().getIoHandler()) == 0:
-      error "failed to close the thread's IOCP port; the handle leaks"
+    getThreadDispatcher().getIoHandler()
   else:
-    getThreadDispatcher().getIoHandler().close2().isOkOr:
-      error "failed to close the thread's poller; the fd leaks", err = error
+    ThreadPoller(getThreadDispatcher().getIoHandler().getFd())
+
+proc closeJoinedPoller(poller: var ThreadPoller) =
+  ## Closes a joined thread's poller. Only past the join does nothing poll it: a
+  ## library's `onThreadDestruction` hook runs after the thread body returns.
+  if poller == NoPoller:
+    return
+  when defined(windows):
+    if closeHandle(poller) == 0:
+      error "failed to close a joined thread's IOCP port; the handle leaks",
+        err = osErrorMsg(osLastError())
+  else:
+    if posix.close(poller) != 0:
+      error "failed to close a joined thread's poller; the fd leaks",
+        err = osErrorMsg(osLastError())
+  poller = NoPoller
 
 include ./event_thread
 include ./ffi_thread
@@ -181,6 +205,8 @@ proc startContextThreads*[T](ctx: ptr FFIContext[T]): Result[void, string] =
 
   ctx.ffiThreadExited.store(false)
   ctx.running.store(true)
+  ctx.ffiPoller = NoPoller
+  ctx.eventPoller = NoPoller
 
   try:
     createThread(ctx.ffiThread, ffiThreadBody[T], ctx)
@@ -197,6 +223,7 @@ proc startContextThreads*[T](ctx: ptr FFIContext[T]): Result[void, string] =
       error "failed to signal ffiThread during event-thread cleanup",
         error = fireRes.error
     joinThread(ctx.ffiThread)
+    closeJoinedPoller(ctx.ffiPoller)
     return err("failed to create the event thread: " & getCurrentExceptionMsg())
 
   ok()
@@ -360,6 +387,8 @@ proc stopAndJoinThreads*[T](
 
   ?ctx.threadExitSignal.waitExitOrErr("FFI thread", timeout)
   joinThread(ctx.ffiThread)
+  closeJoinedPoller(ctx.ffiPoller)
   ?ctx.eventThreadExitSignal.waitExitOrErr("event thread", timeout)
   joinThread(ctx.eventThread)
+  closeJoinedPoller(ctx.eventPoller)
   ok()
